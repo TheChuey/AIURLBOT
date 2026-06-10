@@ -1,110 +1,83 @@
-from typing import TypedDict
-from langgraph.graph import StateGraph, END
-from langchain_ollama import ChatOllama
-from langchain.tools import tool
 from ddgs import DDGS
+from typing import List
+from urllib.parse import urlparse
 
 
-llm = ChatOllama(
-    model="qwen2.5-coder",
-    temperature=0
-)
+# ============================================================
+# VALIDATION HELPERS
+# ============================================================
+
+def is_valid_url(url: str) -> bool:
+    """
+    Ensures only usable HTTP/HTTPS URLs are returned.
+    """
+
+    if not url:
+        return False
+
+    parsed = urlparse(url)
+
+    return parsed.scheme in ("http", "https")
 
 
-@tool
-def duckduckgo_search(query: str) -> str:
-    """Search DuckDuckGo and return URLs."""
+# ============================================================
+# MAIN FUNCTION
+# ============================================================
 
-    with DDGS() as ddgs:
+def get_urls(query: str) -> List[str]:
+    """
+    Input:
+        query (str): user search query
 
-        results = ddgs.text(
-            query,
-            max_results=10
-        )
+    Process:
+        - Runs DuckDuckGo search
+        - Extracts URLs safely
+        - Filters invalid or empty results
+        - Removes duplicates
 
-        return "\n".join(
-            r["href"]
-            for r in results
-            if "href" in r
-        )
+    Output:
+        List[str]: clean working URLs
+    """
 
-
-class State(TypedDict):
-
-    input: str
-    tool_result: str
-
-
-def search_node(state: State):
-
-    result = duckduckgo_search.invoke(
-        state["input"]
-    )
-
-    return {
-        "tool_result": result
-    }
-
-
-def llm_node(state: State):
-
-    prompt = f"""
-You are a URL filtering agent.
-
-User Request:
-{state["input"]}
-
-Search Results:
-{state["tool_result"]}
-
-Return ONLY relevant URLs.
-"""
-
-    response = llm.invoke(prompt)
-
-    return {
-        "tool_result": response.content
-    }
-
-
-def final_node(state: State):
-
-    return {
-        "tool_result": state["tool_result"]
-    }
-
-
-graph = StateGraph(State)
-
-graph.add_node("search", search_node)
-graph.add_node("llm", llm_node)
-graph.add_node("final", final_node)
-
-graph.set_entry_point("search")
-
-graph.add_edge("search", "llm")
-graph.add_edge("llm", "final")
-graph.add_edge("final", END)
-
-app = graph.compile()
-
-
-def get_urls(query: str) -> list[str]:
-
-    result = app.invoke(
-        {
-            "input": query
-        }
-    )
+    print("\n[URL AGENT] Searching query:", query)
 
     urls = []
 
-    for line in result["tool_result"].splitlines():
+    try:
 
-        line = line.strip()
+        with DDGS() as ddgs:
 
-        if line.startswith("http"):
+            results = ddgs.text(query, max_results=10)
 
-            urls.append(line)
+            for r in results:
 
-    return urls
+                # ------------------------------------------------
+                # SAFE EXTRACTION (handles API variations)
+                # ------------------------------------------------
+                url = r.get("href") or r.get("url")
+
+                if not url:
+                    continue
+
+                if is_valid_url(url):
+                    urls.append(url)
+
+        # remove duplicates while preserving order
+        seen = set()
+        clean_urls = []
+
+        for u in urls:
+            if u not in seen:
+                seen.add(u)
+                clean_urls.append(u)
+
+        print(f"[URL AGENT] Raw results: {len(urls)}")
+        print(f"[URL AGENT] Clean URLs: {len(clean_urls)}")
+
+        return clean_urls
+
+    except Exception as e:
+
+        print("[URL AGENT ERROR]", str(e))
+
+        return []
