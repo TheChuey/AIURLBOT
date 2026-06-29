@@ -8,7 +8,7 @@ from report_writer import build_markdown_report, save_markdown
 # INPUT
 # ============================================================
 
-query = "top ai agents for small business 2026"
+query = "jobs in AI Agent Coding"
 
 
 # ============================================================
